@@ -69,6 +69,22 @@ namespace ego_onboard
     std::lock_guard<std::mutex> lk(mtx_);
     if (!grid_map_) buildMap(reference_height);
   }
+
+  // 时钟不连续：位姿的绝对时间已不可信，清空位姿缓冲并丢弃当前轨迹。
+  // 栅格地图保持不动——已插入的点都是世界系坐标，与时间映射无关。
+  void EgoPlannerAdapter::clearPoseHistory() {
+    std::lock_guard<std::mutex> lk(mtx_);
+    pose_buf_ = ego_sensor::PoseBuffer();
+    pose_buf_.setStrictCoverage(cfg_.strict_pose_coverage);
+    last_pose_.setZero();
+    have_pose_ = false;
+    newest_pose_time_ = -1e9;
+    have_traj_ = false;
+    braking_ = true;
+    have_cmd_ = false;
+    collides_ahead_ = false;
+    last_plan_ = -1e9;
+  }
   bool EgoPlannerAdapter::frameCovered(const ego_sensor::LidarFrame &frame) const {
     std::lock_guard<std::mutex> lk(mtx_);
     if (frame.points.empty()) return false;

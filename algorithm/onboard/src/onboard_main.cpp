@@ -158,10 +158,11 @@ int main(int argc,char **argv) {
       const bool stable=epoch.sample(monotonicSeconds(),unixSeconds());
       if(!stable || sync_generation!=pilot.timeAlignment().generation()) {
         clock_stable_since=now;last_input_ok=-1e9;sync_generation=pilot.timeAlignment().generation();
-        // Mixed-clock maps must never be reused after a clock discontinuity.
+        // Clock discontinuity: discard pose history and in-flight frames only.
+        // The occupancy map is world-frame and stays valid, so no rebuild here.
         const bool active=pilot.phase()==Phase::PRE_OFFBOARD||pilot.phase()==Phase::OFFBOARD_CRUISE||pilot.phase()==Phase::HOLD;
         if(control&&active) { pilot.stop("clock discontinuity: restart perception before control");failed=true;break; }
-        async.reset(new AsyncPlanner(app.adapter,app.pilot.cruise_alt_m)); planner=async.get(); pilot.setPlanner(planner);planner_bound=false;
+        if(planner) planner->resetClockState();
       }
       const auto lidar_status=lidar.stats();
       const double last_sync=epoch.toMonotonic(lidar_status.last_sync_ns*1e-9);

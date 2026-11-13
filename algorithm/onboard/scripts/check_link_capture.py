@@ -36,7 +36,6 @@ def check(directory):
         raise ValueError('；'.join(failures))
     return '观察输入链路通过：RTK、飞控校时、位姿、PTP、点云对齐和地图持续更新。飞控控制执行及外部地面站接收仍需分别验收。'
 
-
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         sys.exit('用法：python3 check_link_capture.py <record-dir>')

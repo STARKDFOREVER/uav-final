@@ -4,7 +4,7 @@ set -euo pipefail
 project=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$project"
 if [[ $(id -u) != 0 ]]; then
-  echo 'Run through the Windows launcher, or use sudo for the PTP master.' >&2
+  echo 'Run as root (sudo); the PTP master needs CAP_NET_ADMIN.' >&2
   exit 2
 fi
 raw_diagnostics=false
@@ -17,7 +17,7 @@ duration=${1:-120}
 [[ "$duration" =~ ^[0-9]+$ ]] && ((duration>=5 && duration<=3600)) || { echo 'Duration must be 5..3600 seconds.' >&2; exit 2; }
 owner=$(stat -c '%U' "$project")
 serial=/dev/serial/by-id/usb-ACFLy_ACFLy_Device_123456-if00
-[[ -e "$serial" ]] || { echo 'FCU USB is not attached to WSL.' >&2; exit 2; }
+[[ -e "$serial" ]] || { echo "FCU serial device not found: $serial" >&2; exit 2; }
 command -v ptp4l >/dev/null || { echo 'linuxptp is required.' >&2; exit 2; }
 if pgrep -x ptp4l >/dev/null; then
   echo 'A ptp4l process already exists. Finish that capture before starting another.' >&2

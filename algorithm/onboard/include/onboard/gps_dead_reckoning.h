@@ -3,6 +3,8 @@
 
 // GPS 丢星后的短时航位推算（dead reckoning），输出经纬高。
 //   位置 = 最后一帧有效 GPS 位置 + ∫ v·dt
+// 只做短时推算，不建模风与姿态误差，误差随时间快速累积；
+// 结果仅用于上报和航点判定，不参与控制输出。
 
 #include <algorithm>
 #include <cmath>
@@ -11,15 +13,18 @@
 namespace ego_onboard
 {
 
+  // 一个经纬高定位点；valid=false 表示还没有拿到过有效定位
   struct GeoFix
   {
     double lat_deg = 0.0, lon_deg = 0.0, alt_m = 0.0;
     bool valid = false;
   };
 
+  // 以最后一帧有效定位为锚点，用 ENU 速度做梯形积分得到相对位移。
   class GpsDeadReckoner
   {
   public:
+    // 清空锚点、位移和速度，回到"还没有定位"的状态
     void reset()
     {
       anchor_ = GeoFix();
@@ -58,6 +63,7 @@ namespace ego_onboard
     }
 
     // 推算的经纬高；age_s = 距最后一次有效定位多久
+    // 小位移近似：北向 +y、东向 +x，经度按当前纬度做 cos 修正
     bool estimate(double now, GeoFix &out, double &age_s) const
     {
       if (!have_)
@@ -73,16 +79,18 @@ namespace ego_onboard
       return true;
     }
 
+    // 是否已经有锚点（至少拿到过一次有效定位）
     bool hasAnchor() const { return have_; }
+    // 自锚点起的 ENU 累计位移（米）
     const Eigen::Vector3d &offset() const { return offset_; }
 
   private:
-    GeoFix anchor_;
+    GeoFix anchor_;                                    // 最后一帧有效定位
     Eigen::Vector3d offset_ = Eigen::Vector3d::Zero(); // 自锚点起的 ENU 位移
     Eigen::Vector3d v_ = Eigen::Vector3d::Zero();      // 上一次速度（梯形积分用）
-    double t_last_ = 0.0;
-    double t_anchor_ = 0.0;
-    bool have_ = false;
+    double t_last_ = 0.0;                              // 上一次喂速度的时刻
+    double t_anchor_ = 0.0;                            // 锚点时刻（用于算 age_s）
+    bool have_ = false;                                // 是否已经有过有效定位
   };
 
 } // namespace ego_onboard

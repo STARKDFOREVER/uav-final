@@ -3,10 +3,6 @@
 set -euo pipefail
 [[ $# == 3 ]] || { echo 'Usage: sudo install_boot_service.sh <run-user> <physical-lidar-interface> <fcu-device>' >&2; exit 2; }
 [[ $(id -u) == 0 ]] || { echo 'Installation requires root on the onboard computer.' >&2; exit 2; }
-if grep -qi microsoft /proc/sys/kernel/osrelease; then
-  echo 'Install this boot service on the actual RK3588/Linux computer; WSL is not the deployment target.' >&2
-  exit 2
-fi
 [[ $(ps -p 1 -o comm=) == systemd ]] || { echo 'This deployment requires a Linux system booted with systemd.' >&2; exit 2; }
 project=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 run_user=$1

@@ -52,6 +52,9 @@ namespace ego_onboard
     // 丢弃当前轨迹（例如丢星悬停后恢复，旧轨迹已经过期）。
     // 默认什么都不做，假规划器不必实现。
     virtual void dropTrajectory() {}
+    // 时钟不连续（PTP/NTP 步进、飞控重启）：位姿历史与在途点云帧已不可信；
+    // 地图像素是世界系坐标，仍然有效，所以只清这两类状态，不重建地图。
+    virtual void resetClockState() { dropTrajectory(); }
     // 感知是否健康。连续丢帧 = 点云没进图，避障已经形同虚设，必须停下来。
     // 默认 true，假规划器不必实现。
     virtual bool sensingHealthy() const { return true; }
@@ -92,11 +95,11 @@ namespace ego_onboard
       // 时序
       double heartbeat_hz = 1.0;
       double link_timeout = 3.0;     // 多久收不到飞控心跳算失联
-      double pre_offboard_stream_s = 1.5;
+      double pre_offboard_stream_s = 1.5; // 切 Offboard 前连续预发 setpoint 的时长
       // 任务
       double cruise_alt_m = 50.0; // 仅用于地面站起飞后接管的高度检查
-      double handover_alt_tolerance_m = 1.0;
-      double handover_position_tolerance_m = 5.0;
+      double handover_alt_tolerance_m = 1.0;      // 接管高度允许误差
+      double handover_position_tolerance_m = 5.0; // 接管水平位置允许误差
       double wp_reach_tol = 1.5;     // 航点到达判定
       // 规划
       bool use_planner = true;       // false = 只跑时序（离线验证用）
@@ -118,11 +121,11 @@ namespace ego_onboard
       double hold_recover_confirm_s = 2.0;
 
       // 输出形态：位置 + yaw 必发；速度前馈可选。
-      bool velocity_feedforward = false;
-      bool observe_only = false;
-      double pose_timeout_s = 0.25;
+      bool velocity_feedforward = false; // 是否在 setpoint 里带速度前馈
+      bool observe_only = false;         // true = 只观察/记录，不切模式、不发 setpoint
+      double pose_timeout_s = 0.25;      // 位姿超过多久算不新鲜
       double position_extrapolation_s = 0.25; // 单帧位置+速度外推的有效时长；新位置立即换锚点
-      double setpoint_hz = 20.0;
+      double setpoint_hz = 20.0;         // setpoint 发送频率
       
     };
 
@@ -131,11 +134,16 @@ namespace ego_onboard
     const Config &config() const { return cfg_; }
 
     // 航线以「第 1 个航点 = 起飞点」约定传入（与 KML 一致）
+    // 进入 LINK 阶段；t_start_ = -1 表示还没开始正式巡航计时
     void start(const std::vector<GeoWaypoint> &route);
+    // 观察模式：只收报文、跟踪状态，不切 Offboard、不发 setpoint
     void startObserving() { cfg_.observe_only = true; phase_ = Phase::LINK; t_start_ = -1; }
+    // 由主循环每拍注入统一时钟（tick 与报文处理都用这个时刻）
     void setReceiveTime(double now) { t_now_ = now; }
+    // 外部依赖（雷达/地图/任务）是否就绪；false 时不会进入接管
     void setInputReady(bool ready) { input_ready_ = ready; }
     const TimeAlignment &timeAlignment() const { return alignment_; }
+    // 当前用于控制的位姿是否新鲜：时间未超时、可外推、位置/姿态都在有效期内
     bool poseFresh(double now) const {
       Eigen::Vector3d predicted;
       return have_pos_ && now >= latest_pose_.t &&
@@ -143,15 +151,19 @@ namespace ego_onboard
         latest_pose_.position_anchor.positionAt(now,predicted) &&
         now-t_last_pos_ <= cfg_.position_extrapolation_s && now-t_last_att_ <= cfg_.pose_timeout_s;
     }
+    // 飞控校时是否已收敛（样本足够且未超时）
     bool clockReady(double now) const { return alignment_.valid(now); }
+    // 外部要求停止：直接进入 FAILED 并记录原因
     void stop(const std::string &why) { fail(why); }
+    // 由 TIMESYNC 估计出的飞控 UTC 时间（未对时前为 0）
     double fcuUnixTime() const { return fcu_unix_; }
 
 
     // 飞控下行字节（TCP/UDP 收上来的原始流）
+    // 只做解析和状态更新，需要回应答的帧先攒在 outbox_，tick 时统一 flush
     void onMavlinkBytes(const uint8_t *data, size_t len);
 
-    // 周期调用：输出待发送的完整 MAVLink 帧
+    // 周期调用：推进状态机，输出待发送的完整 MAVLink 帧
     void tick(double now, std::vector<std::vector<uint8_t>> &out);
 
     Phase phase() const { return phase_; }
@@ -209,36 +221,36 @@ namespace ego_onboard
     Parser parser_;
     // 接收路径上攒下的待发帧（tick 时统一 flush）
     std::vector<std::vector<uint8_t>> outbox_;
-    double t_now_ = 0.0;
+    double t_now_ = 0.0;  // 本拍统一时钟（由 setReceiveTime/tick 注入）
 
     Phase phase_ = Phase::IDLE;
     GeoOrigin origin_;
     TimeAlignment alignment_;
-    double t_last_home_request_ = -1e9;
-    double t_last_sync_request_ = -1e9, t_last_pos_ = -1e9, t_last_att_ = -1e9;
+    double t_last_home_request_ = -1e9;  // 上次请求 HOME_POSITION 的时刻
+    double t_last_sync_request_ = -1e9, t_last_pos_ = -1e9, t_last_att_ = -1e9; // 上次 TIMESYNC / 位置 / 姿态
     double last_pos_boot_ = -1, last_att_boot_ = -1, fcu_unix_ = 0;
     bool input_ready_ = true;
 
     PoseAssembler pose_asm_;
 
     std::vector<GeoWaypoint> route_;      // 经纬高（含起飞点）
-    std::vector<Eigen::Vector3d> route_enu_;
+    std::vector<Eigen::Vector3d> route_enu_; // 同一条航线的局部 ENU 表示
 
-    SetpointConfig sp_cfg_;
+    SetpointConfig sp_cfg_;    // setpoint 报文格式（坐标系/类型/掩码）
     int leg_ = 0;              // 当前航段序号（route_[leg_] -> route_[leg_+1]）
     uint8_t seq_ = 0;
 
-    double t_start_ = 0.0;
-    double t_phase_ = 0.0;
+    double t_start_ = 0.0;  // 本次任务开始时刻
+    double t_phase_ = 0.0;  // 进入当前阶段的时刻
     double t_last_hb_ = -1e9;
     double t_last_fc_hb_ = -1e9;
     double t_last_setpoint_ = -1e9;
     double t_cmd_sent_ = -1e9;
     uint16_t last_cmd_ = 0;
-    bool mode_switch_sent_ = false;
-    bool waiting_offboard_ = false;
-    bool rates_requested_ = false;
-    double hold_yaw_ = 0.0;
+    bool mode_switch_sent_ = false; // 是否已发过切 Offboard 的 COMMAND_LONG
+    bool waiting_offboard_ = false; // 已请求切换，正在等飞控确认
+    bool rates_requested_ = false;  // 是否已发过提频请求（只发一次）
+    double hold_yaw_ = 0.0;         // 悬停时保持的偏航角
 
     bool armed_ = false;
     uint8_t main_mode_ = 0, sub_mode_ = 0;
@@ -262,7 +274,7 @@ namespace ego_onboard
     int gps_drop_count_ = 0;
     int sensing_drop_count_ = 0;
     double t_hold_clear_ = -1e9; // 所有异常都清除的起始时刻
-    bool sensing_healthy_ = true;
+    bool sensing_healthy_ = true; // 最近一次查询到的感知健康状态
     GpsDeadReckoner reckoner_;   // 丢星后的短时航位推算（只用于上报）
 
     std::string err_;

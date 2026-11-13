@@ -63,7 +63,7 @@ namespace ego_onboard
     try {
     if (const auto n = root["mission_input"]) {
       get(n,"file",out.mission_input.file); get(n,"path_name",out.mission_input.path_name);
-      get(n,"wait_for_file",out.mission_input.wait_for_file); get(n,"file_settle_s",out.mission_input.file_settle_s);
+      get(n,"wait_for_file",out.mission_input.wait_for_file);
       get(n,"max_bytes",out.mission_input.max_bytes); get(n,"max_waypoints",out.mission_input.max_waypoints);
       get(n,"height_mode",out.mission_input.height_mode); get(n,"constant_alt_m",out.mission_input.constant_alt_m);
     }

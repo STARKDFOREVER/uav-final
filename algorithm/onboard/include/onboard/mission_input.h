@@ -10,15 +10,16 @@
 namespace ego_onboard
 {
   // One local KML task per run. Optional inbox waiting precedes device opening.
-  // Cloud transport writes the configured path atomically; READY latches the task.
+  // The uploader overwrites the configured path directly; there is no settle
+  // window, so the file is read as soon as it exists. READY latches the task.
   //
   // 一次开机只接受一个本地 KML 任务：wait_for_file=true 时先等文件出现，
-  // 文件写入稳定且校验通过后进入 READY（任务锁定，不再换文件）。
+  // 出现后立即读取、解析、校验，通过即进入 READY（任务锁定，不再换文件）。
+  // 上传方直接用新文件覆盖同一路径，不要求原子重命名。
   struct MissionInputConfig
   {
     std::string file;                   // KML 路径（相对启动工作目录）
     bool wait_for_file = false;         // 文件不存在时是否一直等待（开机接任务模式）
-    double file_settle_s = 0.5;         // 大小/时间戳稳定多久才读，避免读到写一半的文件
     std::size_t max_bytes = 5 * 1024 * 1024; // 文件大小上限，超限直接拒绝
     std::size_t max_waypoints = 2000;    // includes the first takeoff point
     std::string path_name;              // select a LineString Placemark by name
@@ -70,10 +71,8 @@ namespace ego_onboard
     MissionInputState state_ = MissionInputState::IDLE;
     PreparedMission mission_;
     std::string body_, error_;              // 文件内容 / 最近一次错误
-    std::string observed_version_, rejected_version_; // 用于识别文件是否被改过
-    double stable_since_ = 0;               // 文件开始保持稳定的时刻
-    void rejectOrFail();                    // READY 之后又变文件：按失败处理
-    bool versionUnchanged();                // 与上次观察到的版本比较
+    std::string observed_version_, rejected_version_; // 文件版本（用于识别覆盖/避免重试同一份坏文件）
+    void rejectOrFail();                    // 解析/校验失败：回到等待（wait_for_file）或失败
   };
 }
 #endif

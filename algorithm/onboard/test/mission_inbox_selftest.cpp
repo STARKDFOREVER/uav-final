@@ -20,8 +20,8 @@ int main() {
   input.step(1);input.step(1000);
   check(input.state()==MissionInputState::WAIT_KML&&input.mission().route.empty(),"missing KML waits indefinitely without a task");
   write(path,"<kml>");input.step(1001);input.step(1001.4);
-  check(input.state()==MissionInputState::WAIT_KML,"a new file must settle before it is read");
-  input.step(1001.6);input.step(1001.6);input.step(1001.6);
+  check(input.state()==MissionInputState::PARSING_KML,"a file is read immediately without a settle window");
+  input.step(1001.6);
   check(input.state()==MissionInputState::WAIT_KML&&!input.error().empty()&&input.mission().route.empty(),"partial/invalid KML is rejected while the inbox remains active");
   input.step(1010);
   check(input.state()==MissionInputState::WAIT_KML,"unchanged rejected content is not retried as a new task");
@@ -32,16 +32,16 @@ int main() {
   write(path,"broken replacement");input.step(1012);
   check(input.state()==MissionInputState::READY&&input.mission().route.size()==saved.size()&&input.mission().route[1].lon_deg==saved[1].lon_deg,"READY latches the task; replacement cannot change the active route");
   write(path,valid);input.start(cfg);input.step(2000);input.step(2001);input.step(2001);
-  check(input.state()==MissionInputState::PARSING_KML,"load a stable file for concurrent replacement check");
+  check(input.state()==MissionInputState::VALIDATING_ROUTE,"load a file without settle for concurrent replacement check");
   write(temporary,"invalid new delivery");std::rename(temporary.c_str(),path.c_str());
-  input.step(2001);input.step(2001);
-  check(input.state()==MissionInputState::WAIT_KML&&input.mission().route.empty(),"file changed during validation cannot activate the old contents");
+  input.step(2001);
+  check(input.state()==MissionInputState::READY&&input.mission().route.size()==3,"replacement during validation cannot abort the loaded task");
   std::remove(path.c_str());input.start(cfg);input.step(3000);
   check(input.state()==MissionInputState::WAIT_KML&&input.mission().route.empty(),"restart clears any previous prepared task");
   cfg.wait_for_file=false;input.start(cfg);input.step();
   check(input.state()==MissionInputState::FAILED,"strict prepare-only mode still fails immediately on a missing file");
-  cfg.wait_for_file=true;cfg.file_settle_s=-1;input.start(cfg);
-  check(input.state()==MissionInputState::FAILED,"invalid settle configuration is not silently accepted");
+  cfg.wait_for_file=true;cfg.max_waypoints=0;input.start(cfg);
+  check(input.state()==MissionInputState::FAILED,"invalid mission limits are not silently accepted");
   rmdir(directory);
   return failures?1:0;
 }

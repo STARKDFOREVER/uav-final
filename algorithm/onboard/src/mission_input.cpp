@@ -155,8 +155,6 @@ namespace ego_onboard
     }
     bool configValid(const MissionInputConfig &c, std::string &error)
     {
-      if (!std::isfinite(c.file_settle_s) || c.file_settle_s < 0.1 || c.file_settle_s > 30)
-      { error = "mission_input.file_settle_s must be 0.1..30 seconds"; return false; }
       if (c.max_bytes == 0 || c.max_bytes > static_cast<std::size_t>(INT_MAX) ||
           c.max_waypoints < 2 || c.max_waypoints > 65533 ||
           !std::isfinite(c.min_alt_m) || !std::isfinite(c.max_alt_m) ||
@@ -320,7 +318,7 @@ namespace ego_onboard
     config_ = config;
     mission_ = PreparedMission{};
     body_.clear(); error_.clear();
-    observed_version_.clear(); rejected_version_.clear(); stable_since_ = 0;
+    observed_version_.clear(); rejected_version_.clear();
     state_ = config.wait_for_file ? MissionInputState::WAIT_KML : MissionInputState::LOADING_KML;
     if (!configValid(config_, error_)) state_ = MissionInputState::FAILED;
     else if (config_.file.empty())
@@ -343,18 +341,7 @@ namespace ego_onboard
     state_ = config_.wait_for_file ? MissionInputState::WAIT_KML : MissionInputState::FAILED;
   }
 
-  bool MissionInput::versionUnchanged()
-  {
-    if (!config_.wait_for_file) return true;
-    std::string version, error;
-    if (fileVersion(config_.file, version, error) && version == observed_version_) return true;
-    mission_ = PreparedMission{}; body_.clear(); observed_version_.clear();
-    error_ = "KML changed while loading; waiting for a stable delivery";
-    state_ = MissionInputState::WAIT_KML;
-    return false;
-  }
-
-  void MissionInput::step(double now)
+  void MissionInput::step(double /*now*/)
   {
     switch (state_)
     {
@@ -363,16 +350,17 @@ namespace ego_onboard
       std::string version, error;
       if (!fileVersion(config_.file, version, error))
       { observed_version_.clear(); error_ = error; break; }
-      if (version != observed_version_)
-      { observed_version_ = version; stable_since_ = now; error_.clear(); break; }
-      if (version == rejected_version_ || now - stable_since_ < config_.file_settle_s) break;
+      if (version == rejected_version_) break;
+      // 文件存在即读取，不再等待写入稳定；未传完的内容会解析失败，
+      // 上传继续写入后版本变化，下一步自动重试。
+      observed_version_ = version;
       error_.clear();
       state_ = MissionInputState::LOADING_KML;
       break;
     }
     case MissionInputState::LOADING_KML:
       if (!loadFile(config_, body_, error_)) rejectOrFail();
-      else if (versionUnchanged()) state_ = MissionInputState::PARSING_KML;
+      else state_ = MissionInputState::PARSING_KML;
       break;
     case MissionInputState::PARSING_KML:
       if (!parseMissionKml(body_, config_, mission_, error_)) rejectOrFail();
@@ -381,7 +369,7 @@ namespace ego_onboard
       break;
     case MissionInputState::VALIDATING_ROUTE:
       if (!validateMissionRoute(mission_, config_, error_)) rejectOrFail();
-      else if (versionUnchanged()) { state_ = MissionInputState::READY; error_.clear(); }
+      else { state_ = MissionInputState::READY; error_.clear(); }
       break;
     default: break;
     }

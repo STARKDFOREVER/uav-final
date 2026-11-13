@@ -18,11 +18,10 @@ mavlink:
   heartbeat_hz: 1.0          # GCS 心跳频率
   link_timeout: 3.0          # 多久收不到飞控心跳算失联（巡航中触发即报错）
 
-# 上电等待接收路径；写入稳定且校验成功后自动启动一条任务。地面站起降。
+# 上电等待接收路径；文件出现后立即读取并校验，成功后自动启动一条任务。
 mission_input:
   file: "missions/mission.kml" # 相对启动工作目录；开机服务固定为项目根目录
   wait_for_file: true
-  file_settle_s: 0.5         # 推荐先写临时文件，再原子重命名到上述路径
   height_mode: constant
   constant_alt_m: 50.0
   max_bytes: 5242880
